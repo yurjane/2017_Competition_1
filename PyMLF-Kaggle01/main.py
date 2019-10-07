@@ -255,7 +255,7 @@ class KDimensionalTree(object):
         if node.left_child != None:
             left_child = node.left_child
             left_dis = np.sqrt(sum((item - left_child.item) ** 2))
-            if k > len(node_list) or least_dis < least_dis:
+            if k > len(node_list) or left_dis < least_dis:
                 node_list.append([left_dis, tuple(left_child.item), left_child.label])
                 node_list.sort()  # 对结点列表按距离排序
                 least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
@@ -406,13 +406,13 @@ def k_cross_validation(kcrosses, hyperparameter):
 
 data_set = np.load('./HTRU_2_train.npy')
 train_set = data_set[:, :-1]
-insert_set = (0.7 * train_set[:, 0] + 0.3 * train_set[:, 1])
-train_set = (np.insert(train_set.T, len(train_set.T), insert_set, axis=0)).T
+# insert_set = (0.7 * train_set[:, 0] + 0.3 * train_set[:, 1])
+# train_set = (np.insert(train_set.T, len(train_set.T), insert_set, axis=0)).T
 label_set = data_set[:, -1]
 
 test_set = np.load('./HTRU_2_test.npy')
-insert_set = (0.7 * test_set[:, 0] + 0.3 * test_set[:, 1])
-test_set = (np.insert(test_set.T, len(test_set.T), insert_set, axis=0)).T
+# insert_set = (0.7 * test_set[:, 0] + 0.3 * test_set[:, 1])
+# test_set = (np.insert(test_set.T, len(test_set.T), insert_set, axis=0)).T
 
 # 显示原始数据
 plt.scatter(train_set[label_set == 0, 0], train_set[label_set == 0, 1])
