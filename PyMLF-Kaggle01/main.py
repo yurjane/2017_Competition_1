@@ -1,14 +1,11 @@
 import csv
-import random
 import math
-import numba
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from numba import cuda
 
 # 全局变量声明
 global TRAIN_DATA
@@ -21,17 +18,21 @@ global LABEL_DATA
 
 # 加载文件及预处理
 def load_data(filename):
-    """加载文件"""
+    """
+    加载文件
+    """
     csv_reader = csv.reader(open(filename, encoding='utf-8'))
-    data_set = []
+    data_set = list()
     for row in csv_reader:
         data_set.append(row)
     data_set = np.array(data_set[:], dtype=np.float)
     return data_set
 
 
-def data_preprocessing(filename):
-    """将 csv 数据保存为 npy 数据，避免多次提取浪费时间"""
+def data_preprocess(filename):
+    """
+    将 csv 数据保存为 npy 数据，避免多次提取浪费时间
+    """
     data_set = load_data(filename)
     filename_prefix = re.split('[./]', filename)[-2]
     np.save(f'./{filename_prefix}.npy', data_set)
@@ -39,9 +40,10 @@ def data_preprocessing(filename):
 
 
 # 基本数据处理
-# @cuda.jit
 def get_deal_data(data_set):
-    """获得数据0均值1方差处理过程中的均值方差"""
+    """
+    获得数据0均值1方差处理过程中的均值方差
+    """
     datas = data_set.T
     means = np.zeros(len(datas))
     stds = np.zeros(len(datas))
@@ -51,34 +53,39 @@ def get_deal_data(data_set):
     return means, stds
 
 
-# @cuda.jit
+# 根据 get_deal_data() 函数的结果处理数据
 def deal_data(data_set, means, stds):
-    '''根据均值，方差处理数据'''
-    datas = data_set.T
-    for sub in range(len(datas)):
-        datas[sub] = (datas[sub] - means[sub]) / stds[sub]
-    return datas.T
+    """
+    根据均值，方差处理数据
+    """
+    to_deal_data = data_set.T
+    for sub in range(len(to_deal_data)):
+        to_deal_data[sub] = (to_deal_data[sub] - means[sub]) / stds[sub]
+    return to_deal_data.T
 
 
-
-def get_data_downD_matrix(data_set, alpha=1.0):
-    '''获得降维矩阵'''
-    datas = data_set.T
-    cov = np.cov(datas)
-    specialConquest, specialConquestAmount = np.linalg.eig(cov)
-    points = [sub for sub in range(len(specialConquest))]
-    points.sort(key=lambda x: specialConquest[x], reverse=True)
+def get_down_dimensional_matrix(data_set, alpha=1.0):
+    """
+    获得降维矩阵
+    """
+    to_deal_data = data_set.T
+    cov = np.cov(to_deal_data)
+    special_conquest, special_conquest_amount = np.linalg.eig(cov)
+    points = [sub for sub in range(len(special_conquest))]
+    points.sort(key=lambda x: special_conquest[x], reverse=True)
+    down_dimensional_matrix = None
     for length in range(len(points) + 1):
-        if sum(specialConquest[points[:length]]) / sum(specialConquest) >= alpha:
-            downDMatrix = specialConquestAmount[:, points[:length]]
+        if sum(special_conquest[points[:length]]) / sum(special_conquest) >= alpha:
+            down_dimensional_matrix = special_conquest_amount[:, points[:length]]
             break
-    return downDMatrix
+    return down_dimensional_matrix
 
 
 # k 近邻算法
 class KDimensionalNode(object):
-    '''结点对象'''
-
+    """
+    结点对象
+    """
     def __init__(self, item=None, label=None, dim=None, parent=None, left_child=None, right_child=None):
         self.item = item  # 结点的值(样本信息)
         self.label = label  # 结点的标签
@@ -89,19 +96,17 @@ class KDimensionalNode(object):
 
 
 class KDimensionalTree(object):
-    '''KD 树'''
-
+    """
+    KD 树
+    """
     def __init__(self, point_set):
-        self.__length = 0  # 不可修改
-        self.__root = self.__create(point_set)  # 根结点, 私有属性, 不可修改
+        self.__length = 0
+        self.__root = self.__create(point_set)
 
-    def __create(self, point_set: list, parentNode=None):
-        '''
+    def __create(self, point_set: list, parent_node=None):
+        """
         创建 KD 树
-        :point_set: 相对于训练数据的下标索引
-        :parentNode: 父结点
-        :return: 根结点
-        '''
+        """
         # 处理空数据
         lens = len(point_set)
         if lens == 0:
@@ -125,7 +130,7 @@ class KDimensionalTree(object):
                 dim=max_index,
                 label=LABEL_DATA[mid_item_index],
                 item=TRAIN_DATA[mid_item_index],
-                parent=parentNode,
+                parent=parent_node,
                 left_child=None,
                 right_child=None
             )
@@ -135,7 +140,7 @@ class KDimensionalTree(object):
             dim=max_index,
             label=LABEL_DATA[mid_item_index],
             item=TRAIN_DATA[mid_item_index],
-            parent=parentNode,
+            parent=parent_node,
             left_child=None,
             right_child=None
         )
@@ -162,130 +167,97 @@ class KDimensionalTree(object):
     def root(self):
         return self.__root
 
-    def transfer_list(self, node, kdList=[]):
-        '''
-        将kd树转化为嵌套字典的列表输出
-        :param node: 需要传入根结点
-        :return: 返回嵌套字典的列表，格式如下
-        [{'item': (9, 3),
-             'label': 1,
-             'dim': 0,
-             'parent': None,
-             'left_child': (3, 4),
-             'right_child': (11, 11)
-         },
-         {'item': (3, 4),
-            'label': 1,
-            'dim': 1,
-            'parent': (9, 3),
-            'left_child': (7, 0),
-            'right_child': (3, 15)
-         }]
-        '''
-        if node == None:
+    def transfer_list(self, node, kdList=None):
+        """
+        将kd树的元素转化为嵌套字典的列表输出s
+        """
+        kdList = kdList if kdList is not None else []
+        if node is not None:
             return None
-        element_dict = {}
+        element_dict = dict()
         element_dict['item'] = tuple(node.item)
         element_dict['label'] = node.label
-        element_dict['dim'] = node.dim
-        element_dict['parent'] = tuple(node.parent.item) if node.parent else None
-        element_dict['left_child'] = tuple(node.left_child.item) if node.left_child else None
-        element_dict['right_child'] = tuple(node.right_child.item) if node.right_child else None
         kdList.append(element_dict)
         self.transfer_list(node.left_child, kdList)
         self.transfer_list(node.right_child, kdList)
         return kdList
 
     def _find_nearest_neighbour(self, item):
-        '''
+        """
         找最近邻点
-        :param item:需要预测的新样本
-        :return: 距离最近的样本点
-        '''
-        itemArray = np.array(item)
-        if self.length == 0:  # 空kd树
+        """
+        if self.length == 0:
             return None
-        # 递归找离测试点最近的那个叶结点
+
+        # 递归找离测试点最近的结点
         node = self.__root
-        if self.length == 1:  # 只有一个样本
+        if self.length == 1:
             return node
         while True:
             cur_dim = node.dim
-            if item[cur_dim] == node.item[cur_dim]:
-                return node
-            elif item[cur_dim] < node.item[cur_dim]:  # 进入左子树
-                if node.left_child == None:  # 左子树为空，返回自身
+            if item[cur_dim] <= node.item[cur_dim]:
+                if node.left_child is not None:
                     return node
                 node = node.left_child
             else:
-                if node.right_child == None:  # 右子树为空，返回自身
+                if node.right_child is not None:
                     return node
                 node = node.right_child
 
-    def knn_algo(self, item, k=1):
-        '''
+    def knn_algorithm(self, item, k=1):
+        """
         找到距离测试样本最近的前k个样本
-        :param item: 测试样本
-        :param k: knn算法参数，定义需要参考的最近点数量，一般为1-5
-        :return: 返回前k个样本的最大分类标签
-        '''
+        """
+        # 当树中的元素不够时，全部返回
         if self.length <= k:
             label_dict = {}
-            # 获取所有label的数量
             for element in self.transfer_list(self.root):
                 if element['label'] in label_dict:
                     label_dict[element['label']] += 1
                 else:
                     label_dict[element['label']] = 1
-            sorted_label = sorted(label_dict.items(), key=lambda item: item[1], reverse=True)  # 给标签排序
+            sorted_label = sorted(label_dict.items(), key=lambda a_elem: a_elem[1], reverse=True)  # 给标签排序
             return sorted_label[0][0]
 
         item = np.array(item)
-        node = self._find_nearest_neighbour(item)  # 找到最近的那个结点
-        if node == None:  # 空树
+        node = self._find_nearest_neighbour(item)
+        if node is None:
             return None
-        # print('靠近点%s最近的叶结点为:%s'%(item, node.item))
         node_list = []
-        distance = np.sqrt(sum((item - node.item) ** 2))  # 测试点与最近点之间的距离
+        distance = np.sqrt(sum((item - node.item) ** 2))
         least_dis = distance
-        # 返回上一个父结点，判断以测试点为圆心，distance为半径的圆是否与父结点分隔超平面相交，若相交，则说明父结点的另一个子树可能存在更近的点
-        node_list.append([distance, tuple(node.item), node.label])  # 需要将距离与结点一起保存起来
 
-        # 若最近的结点不是叶结点，则说明，它还有左子树
-        if node.left_child != None:
-            left_child = node.left_child
-            left_dis = np.sqrt(sum((item - left_child.item) ** 2))
-            if k > len(node_list) or left_dis < least_dis:
-                node_list.append([left_dis, tuple(left_child.item), left_child.label])
-                node_list.sort()  # 对结点列表按距离排序
-                least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
+        # 返回上一个父结点，判断以测试点为圆心，distance为半径的圆是否与父结点分隔超平面相交，若相交，则说明父结点的另一个子树可能存在更近的点
+        node_list.append([distance, tuple(node.item), node.label])
+
         # 回到父结点
         while True:
-            if node == self.root:  # 已经回到kd树的根结点
+            if node == self.root:
                 break
             parent = node.parent
+
             # 计算测试点与父结点的距离，与上面距离做比较
             par_dis = np.sqrt(sum((item - parent.item) ** 2))
-            if k > len(node_list) or par_dis < least_dis:  # k大于结点数或者父结点距离小于结点列表中最大的距离
+            if k > len(node_list) or par_dis < least_dis:
                 node_list.append([par_dis, tuple(parent.item), parent.label])
-                node_list.sort()  # 对结点列表按距离排序
+                node_list.sort()
                 least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
 
             # 判断父结点的另一个子树与结点列表中最大的距离构成的圆是否有交集
-            if k > len(node_list) or abs(item[parent.dim] - parent.item[parent.dim]) < least_dis:  # 说明父结点的另一个子树与圆有交集
-                # 说明父结点的另一子树区域与圆有交集
-                other_child = parent.left_child if parent.left_child != node else parent.right_child  # 找另一个子树
-                # 测试点在该子结点超平面的左侧
-                if other_child != None:
+            if k > len(node_list) or abs(item[parent.dim] - parent.item[parent.dim]) < least_dis:
+                other_child = parent.left_child if parent.left_child != node else parent.right_child
+                if other_child is not None:
                     if item[parent.dim] - parent.item[parent.dim] <= 0:
                         self.left_search(item, other_child, node_list, k)
                     else:
-                        self.right_search(item, other_child, node_list, k)  # 测试点在该子结点平面的右侧
+                        self.right_search(item, other_child, node_list, k)
 
-            node = parent  # 否则继续返回上一层
+            node = parent
+
         # 接下来取出前k个元素中最大的分类标签
         label_dict = {}
         node_list = node_list[:k]
+
         # 获取所有label的数量
         for element in node_list:
             theta = math.exp(-element[0])
@@ -293,70 +265,64 @@ class KDimensionalTree(object):
                 label_dict[element[2]] += theta
             else:
                 label_dict[element[2]] = theta
-        sorted_label = sorted(label_dict.items(), key=lambda item: item[1], reverse=True)  # 给标签排序
+        sorted_label = sorted(label_dict.items(), key=lambda a_elem: a_elem[1], reverse=True)  # 给标签排序
         return sorted_label[0][0], node_list
 
-    def left_search(self, item, node, nodeList, k):
-        '''
+    def left_search(self, item, node, node_list, k):
+        """
         按左中右顺序遍历子树结点，返回结点列表
-        :param node: 子树结点
-        :param item: 传入的测试样本
-        :param nodeList: 结点列表
-        :param k: 搜索比较的结点数量
-        :return: 结点列表
-        '''
-        nodeList.sort()  # 对结点列表按距离排序
-        least_dis = nodeList[-1][0] if k >= len(nodeList) else nodeList[k - 1][0]
-        if node.left_child == None and node.right_child == None:  # 叶结点
+        """
+        # 遍历左子树
+        node_list.sort()
+        least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
+        if node.left_child is None and node.right_child is None:  # 叶结点
             dis = np.sqrt(sum((item - node.item) ** 2))
-            if k > len(nodeList) or dis < least_dis:
-                nodeList.append([dis, tuple(node.item), node.label])
+            if k > len(node_list) or dis < least_dis:
+                node_list.append([dis, tuple(node.item), node.label])
             return
-        self.left_search(item, node.left_child, nodeList, k)
-        # 每次进行比较前都更新nodelist数据
-        nodeList.sort()  # 对结点列表按距离排序
-        least_dis = nodeList[-1][0] if k >= len(nodeList) else nodeList[k - 1][0]
-        # 比较根结点
+        self.left_search(item, node.left_child, node_list, k)
+
+        # 每次进行比较前都更新 node_list 数据
+        node_list.sort()
+        least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
+
+        # 比较当前根结点
         dis = np.sqrt(sum((item - node.item) ** 2))
-        if k > len(nodeList) or dis < least_dis:
-            nodeList.append([dis, tuple(node.item), node.label])
-        # 右子树
-        if k > len(nodeList) or abs(item[node.dim] - node.item[node.dim]) < least_dis:  # 需要搜索右子树
-            if node.right_child != None:
-                self.left_search(item, node.right_child, nodeList, k)
+        if k > len(node_list) or dis < least_dis:
+            node_list.append([dis, tuple(node.item), node.label])
 
-        return nodeList
+        # 遍历右子树
+        if k > len(node_list) or abs(item[node.dim] - node.item[node.dim]) < least_dis:
+            if node.right_child is not None:
+                self.right_search(item, node.right_child, node_list, k)
 
-    def right_search(self, item, node, nodeList, k):
-        '''
+        return node_list
+
+    def right_search(self, item, node, node_list, k):
+        """
         按右中左顺序遍历子树结点
-        :param item: 测试的样本点
-        :param node: 子树结点
-        :param nodeList: 结点列表
-        :param k: 搜索比较的结点数量
-        :return: 结点列表
-        '''
-        nodeList.sort()  # 对结点列表按距离排序
-        least_dis = nodeList[-1][0] if k >= len(nodeList) else nodeList[k - 1][0]
-        if node.left_child == None and node.right_child == None:  # 叶结点
+        """
+        node_list.sort()
+        least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
+        if node.left_child is not None and node.right_child is not None:
             dis = np.sqrt(sum((item - node.item) ** 2))
-            if k > len(nodeList) or dis < least_dis:
-                nodeList.append([dis, tuple(node.item), node.label])
+            if k > len(node_list) or dis < least_dis:
+                node_list.append([dis, tuple(node.item), node.label])
             return
-        if node.right_child != None:
-            self.right_search(item, node.right_child, nodeList, k)
+        if node.right_child is not None:
+            self.right_search(item, node.right_child, node_list, k)
 
-        nodeList.sort()  # 对结点列表按距离排序
-        least_dis = nodeList[-1][0] if k >= len(nodeList) else nodeList[k - 1][0]
-        # 比较根结点
+        node_list.sort()
+        least_dis = node_list[-1][0] if k >= len(node_list) else node_list[k - 1][0]
+
         dis = np.sqrt(sum((item - node.item) ** 2))
-        if k > len(nodeList) or dis < least_dis:
-            nodeList.append([dis, tuple(node.item), node.label])
-        # 左子树
-        if k > len(nodeList) or abs(item[node.dim] - node.item[node.dim]) < least_dis:  # 需要搜索左子树
-            self.right_search(item, node.left_child, nodeList, k)
+        if k > len(node_list) or dis < least_dis:
+            node_list.append([dis, tuple(node.item), node.label])
 
-        return nodeList
+        if k > len(node_list) or abs(item[node.dim] - node.item[node.dim]) < least_dis and node.left_child is not None:
+            self.left_search(item, node.left_child, node_list, k)
+
+        return node_list
 
 
 def get_test_label():
@@ -404,11 +370,11 @@ def k_cross_validation(kcrosses, hyperparameter):
 # data_preprocessing('./HTRU_2.csv')
 
 
-data_set = np.load('./HTRU_2_train.npy')
-train_set = data_set[:, :-1]
+data = np.load('./HTRU_2_train.npy')
+train_set = data[:, :-1]
 # insert_set = (0.7 * train_set[:, 0] + 0.3 * train_set[:, 1])
 # train_set = (np.insert(train_set.T, len(train_set.T), insert_set, axis=0)).T
-label_set = data_set[:, -1]
+label_set = data[:, -1]
 
 test_set = np.load('./HTRU_2_test.npy')
 # insert_set = (0.7 * test_set[:, 0] + 0.3 * test_set[:, 1])
@@ -430,60 +396,58 @@ plt.legend()
 plt.show()
 
 # 模型训练
-global TRAIN_DATA
-global LABEL_DATA
 TRAIN_DATA = train_set
 LABEL_DATA = label_set
 
 # k折交叉验证
-# print(k_cross_validation(4, list(range(5, 31))))
+# print(k_cross_validation(4, list(range(26, 100))))
 
 # 模型测试
 point_set = [sub for sub in range(len(train_set))]
 tree = KDimensionalTree(point_set)
 labels = []
 for elem in test_set:
-    labels.append(tree.knn_algo(elem, k=16)[0])  # 基于 KNN 模型的二分类
+    labels.append(tree.knn_algorithm(elem, k=26)[0])  # 基于 KNN 模型的二分类
 labels = np.array(labels)
-test_label = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0,
-              1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,
-              0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
-              0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0,
-              1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-              0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-              1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-              1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
-              1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-              1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-              0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
-              0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0,
-              0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0,
-              1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0,
-              0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0,
-              1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-              1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
-              0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-              0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0,
-              0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
-              1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
-              0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-              1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
-              1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
-              1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-              1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0,
-              1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0,
-              0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0,
-              0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
-              0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-              1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-              0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
-              1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0,
-              0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-              1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0]
-print(len(labels), len(test_label))
-a = list(labels == test_label)
+# test_label = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+#               1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+#               0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+#               0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0,
+#               1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+#               0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+#               1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+#               1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
+#               1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+#               1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+#               0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
+#               0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0,
+#               0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+#               1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0,
+#               0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0,
+#               1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+#               1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
+#               0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+#               0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+#               0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0,
+#               1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+#               0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+#               1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+#               1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
+#               1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+#               1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0,
+#               1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0,
+#               0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0,
+#               0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+#               0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+#               1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+#               0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+#               1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0,
+#               0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+#               1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0]
+# print(len(labels), len(test_label))
+# a = list(labels == test_label)
 csv_data = [[int(elem)] for elem in labels]
 name = ['y']
-print(a.count(True) / len(a))
+# print(a.count(True) / len(a))
 test_file = pd.DataFrame(columns=name, data=csv_data)
 test_file.to_csv('./test.csv', index_label='id', index=list(range(1, len(label_set) + 1)))
